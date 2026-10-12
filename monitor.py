@@ -79,6 +79,7 @@ def fetch():
             for day in DATES:
                 meals = ("dinner",) if day == DATES[0] else ("lunch", "dinner")
                 for meal in meals:
+                    LOG.info("Searching %s %s", day, meal)
                     first_time = "11:30" if meal == "lunch" else "17:00"
                     page.goto(BOOKING + "?" + urllib.parse.urlencode({"start_date": day,
                         "start_time": first_time, "pax_adult": 1, "service_category_id": COUNTER}),
@@ -116,6 +117,10 @@ def fetch():
                                 raise ValueError("Availability changed during validation")
                             found.add(slot)
             return sorted(found)
+        except Exception as exc:
+            # This scope only handles the public booking browser, never Telegram.
+            LOG.warning("Booking browser failed: %s", str(exc)[:2000])
+            raise
         finally:
             browser.close()
 
