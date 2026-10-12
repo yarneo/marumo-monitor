@@ -11,6 +11,7 @@ class AvailabilityTests(unittest.TestCase):
     def test_explicit_results(self):
         self.assertTrue(classify("Please complete form and continue to confirmation page."))
         self.assertFalse(classify("No tables are available for 1 Person on 2026-10-26"))
+        self.assertFalse(classify("No table is available for 1 Person on October 26, 2026 (Mon) 21:00"))
         self.assertFalse(classify("Number of Guests must be greater than or equal to 2"))
 
     def test_conflicting_stale_result_is_unknown(self):

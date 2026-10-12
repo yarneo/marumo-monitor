@@ -16,14 +16,16 @@ BOOKING = "https://www.tablecheck.com/en/shops/pizza-marumo/reserve"
 COUNTER = "638810bdddd29900402b47e3"
 DATES = ["2026-10-26", "2026-10-27", "2026-10-28"]
 END = datetime(2026, 10, 28, 22, tzinfo=JST)
-STATUS = {"phase": "starting", "last_success": None, "failures": 0}
+STATUS = {"phase": "starting", "last_success": None, "failures": 0,
+          "successful_checks": 0, "telegram_deliveries": 0, "last_delivery": None,
+          "search": None, "slots_checked": 0, "bookable_slots": None}
 LOCK = threading.Lock()
 LOG = logging.getLogger("marumo")
 
 
 def classify(text):
     positive = re.search(r"Please complete (?:the )?form and continue to (?:the )?confirmation page", text, re.I)
-    negative = re.search(r"No tables are available|no availability|not available for online booking|Number of Guests must", text, re.I)
+    negative = re.search(r"No tables? (?:are|is) available|no availability|not available for online booking|Number of Guests must", text, re.I)
     if positive and negative:
         raise ValueError("Conflicting booking results")
     if negative:
@@ -63,12 +65,18 @@ def send(message):
         result = json.load(response)
     if not result.get("ok"):
         raise ValueError("Telegram rejected delivery")
+    with LOCK:
+        STATUS["telegram_deliveries"] += 1
+        STATUS["last_delivery"] = datetime.now(JST).isoformat()
+    LOG.info("Telegram delivery confirmed")
     return result["result"]["message_id"]
 
 
 def fetch():
     from playwright.sync_api import sync_playwright
     found = set()
+    with LOCK:
+        STATUS["slots_checked"] = 0
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, args=["--disable-dev-shm-usage"])
         try:
@@ -80,6 +88,8 @@ def fetch():
                 meals = ("dinner",) if day == DATES[0] else ("lunch", "dinner")
                 for meal in meals:
                     LOG.info("Searching %s %s", day, meal)
+                    with LOCK:
+                        STATUS["search"] = day + " " + meal
                     first_time = "11:30" if meal == "lunch" else "17:00"
                     page.goto(BOOKING + "?" + urllib.parse.urlencode({"start_date": day,
                         "start_time": first_time, "pax_adult": 1, "service_category_id": COUNTER}),
@@ -98,7 +108,8 @@ def fetch():
                     options = times.locator("option").evaluate_all("els => els.map(el => el.value)")
                     index = "0" if meal == "lunch" else "1"
                     plan = page.locator("#reservation_orders_attributes_" + index + "_is_group_order")
-                    plan.check()
+                    if not plan.is_checked():
+                        plan.locator("..").click()
                     for value, slot, slot_meal in target_times(options, day):
                         if slot_meal != meal:
                             continue
@@ -116,6 +127,8 @@ def fetch():
                             if not classify(page.locator("body").inner_text()):
                                 raise ValueError("Availability changed during validation")
                             found.add(slot)
+                        with LOCK:
+                            STATUS["slots_checked"] += 1
             return sorted(found)
         except Exception as exc:
             # This scope only handles the public booking browser, never Telegram.
@@ -168,11 +181,13 @@ def monitor_loop():
                     " Checks roughly every 5 minutes while the free service is running. Render can sleep unless the external scheduler is configured.")
                 announced = True
             prior = slots
-            with LOCK:
-                STATUS.update(phase="running", last_success=datetime.now(JST).isoformat(), failures=0)
             while pending:
                 send(pending[0])
                 pending.pop(0)
+            with LOCK:
+                STATUS.update(phase="running", last_success=datetime.now(JST).isoformat(), failures=0,
+                              bookable_slots=len(slots), search=None)
+                STATUS["successful_checks"] += 1
             LOG.info("Successful check; %d bookable slots", len(slots))
         except Exception as exc:
             with LOCK:
