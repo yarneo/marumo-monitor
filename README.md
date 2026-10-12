@@ -4,7 +4,9 @@ Read-only browser searches for one adult at the counter: October 26 dinner and O
 
 ## Verification status
 
-The result parser and date-window tests pass locally. The live website controls and both positive and negative result messages were checked through Chrome (one target-date dinner query, plus the site's suggested available date to verify the positive signal). **The complete automated scan and Docker deployment have NOT been verified.** Until the deployed service completes a live check and Telegram confirms it, monitoring is not active. UI changes, cloud IP blocking or insufficient memory can prevent checks.
+On October 12, 2026, the full local and Render scans completed successfully. The Render scan checked 26 candidate times across all five date/meal combinations, found no bookable seats, and confirmed Telegram delivery of both its delivery test and first-success notification. Seven local tests cover result parsing, requested dates, opening-alert deduplication and delivery retry. The meal selector now clicks its visible label, and the parser accepts both singular and plural explicit unavailable messages.
+
+The service is https://marumo-monitor.onrender.com on Render's Free plan. **The external wake-up scheduler is still pending cron-job.org account access.** The in-process five-minute loop works while the service is awake; uninterrupted remote checks have not been established. UI changes, cloud IP blocking or insufficient memory can prevent checks.
 
 ## Deploy on Render's Free web-service plan
 
@@ -20,7 +22,7 @@ Free Render storage is ephemeral. Settings come from environment variables and s
 
 ## Status and failure handling
 
-`/health` returns a small public JSON status with the last successful scan time, phase, and failure count; never credentials. Generic time options are not treated as availability. Every candidate requires an explicit positive booking message after asynchronous validation; unknown results are failures, not "no seats". Three consecutive failures queue a Telegram health alert. Failed Telegram deliveries retry while the process remains running.
+`/health` returns the last successful scan time, phase, failure count, completed-check count, current search and checked-slot count, and Telegram delivery count/time; never credentials. A scan is marked successful only after queued notifications are delivered. Generic time options are not treated as availability. Every candidate requires an explicit positive booking message after asynchronous validation; unknown results are failures, not "no seats". Three consecutive failures queue a Telegram health alert. Failed Telegram deliveries retry while the process remains running.
 
 ## Local parser tests
 

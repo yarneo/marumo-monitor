@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 from datetime import datetime
+import monitor
 from monitor import JST, classify, target_times
 
 
@@ -26,6 +28,40 @@ class AvailabilityTests(unittest.TestCase):
         value = str(int(datetime(2026, 10, 27, 18, tzinfo=JST).timestamp()))
         with self.assertRaises(ValueError):
             target_times([value], "2026-10-26")
+
+    def run_two_checks(self, delivery):
+        slots = ["2026-10-26 18:00"]
+        with patch.dict(monitor.os.environ, {"TELEGRAM_BOT_TOKEN": "test", "TELEGRAM_CHAT_ID": "test"}), \
+                patch.object(monitor, "END", datetime(2099, 1, 1, tzinfo=JST)), \
+                patch.object(monitor, "STATUS", monitor.STATUS.copy()), \
+                patch.object(monitor, "fetch", return_value=slots) as fetch, \
+                patch.object(monitor, "send", side_effect=delivery), \
+                patch.object(monitor.time, "sleep", side_effect=[None, StopIteration]):
+            with self.assertRaises(StopIteration):
+                monitor.monitor_loop()
+            self.assertEqual(fetch.call_count, 2)
+
+    def test_opening_alert_is_sent_once_across_repeat_checks(self):
+        sent = []
+        self.run_two_checks(lambda message: sent.append(message))
+        alerts = [message for message in sent if message.startswith("Pizza Marumo:")]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("2026-10-26 18:00", alerts[0])
+        self.assertIn("pax_adult=1", alerts[0])
+        self.assertIn("No reservation has been made", alerts[0])
+
+    def test_failed_opening_delivery_is_retried(self):
+        attempts, delivered = [], []
+        def deliver(message):
+            if message.startswith("Pizza Marumo:"):
+                attempts.append(message)
+                if len(attempts) == 1:
+                    raise OSError("Temporary delivery failure")
+            delivered.append(message)
+        self.run_two_checks(deliver)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        self.assertEqual(sum(message.startswith("Pizza Marumo:") for message in delivered), 1)
 
 
 if __name__ == "__main__":
